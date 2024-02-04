@@ -65,6 +65,7 @@ let compile (tree : ast list) compile_instr header_fmt bol_fmt eol_fmt =
 
 exception ParsingException
 
+
 let z80_compile_instr tok =
   match tok with
   | Tok_incr_case -> (
@@ -84,14 +85,11 @@ let z80_compile_instr tok =
   | _ -> failwith "Impossible"
 
 let z80_compile input =
-  let tree, remaining = parse (lex input) in
-  if remaining <> []
-    then (raise ParsingException)
-    else compile
-      tree z80_compile_instr
-      "ld hl, buffer\nld b, 0"
-      "ld a, (hl)\nand a\njp  z, l_%d_n\n"
-      "ld a, (hl)\nand a\njp nz, l_%d\n"
+  compile
+    input z80_compile_instr
+    "ld hl, buffer\nld b, 0"
+    "ld a, (hl)\nand a\njp  z, l_%d_n\n"
+    "ld a, (hl)\nand a\njp nz, l_%d\n"
 
 
 let x86_compile_instr tok =
@@ -105,15 +103,11 @@ let x86_compile_instr tok =
   | _ -> failwith "Impossible"
       
 let x86_compile input =
-  let tree, remaining = parse (lex input) in
-  if remaining <> []
-    then (raise ParsingException)
-    else compile
-      tree x86_compile_instr
-      "movl buffer, %eax"
-      "cmpb (%%eax), %%bl\nand %%bl, %%bl\njz l_%d_n\n"
-      "movb (%%eax), %%bl\nand %%bl, %%bl\njnz l_%d\n"
-
+  compile
+    input x86_compile_instr
+    "movl buffer, %eax"
+    "cmpb (%%eax), %%bl\nand %%bl, %%bl\njz l_%d_n\n"
+    "movb (%%eax), %%bl\nand %%bl, %%bl\njnz l_%d\n"
 
 let read_lines chan =
   let lines = ref [] in
@@ -127,10 +121,20 @@ let read_lines chan =
 
 let () =
   assert (Array.length Sys.argv <= 2);
+  let parse_with_exception input = 
+    let tree, remaining = parse (lex input) in
+    if remaining <> []
+    then (raise ParsingException)
+    else tree
+  in
   if Array.length Sys.argv = 1
   then print "bf_compiler [architecture]"
   else
     match Sys.argv.(1) with
-    | "z80" -> List.iter z80_compile (read_lines Stdlib.stdin)
-    | "x86" -> List.iter x86_compile (read_lines Stdlib.stdin)
+    | "z80" -> List.iter
+      (fun s -> z80_compile (parse_with_exception s))
+      (read_lines Stdlib.stdin)
+    | "x86" -> List.iter
+      (fun s -> x86_compile (parse_with_exception s))
+      (read_lines Stdlib.stdin)
     | _ -> failwith "Architecture invalide"
