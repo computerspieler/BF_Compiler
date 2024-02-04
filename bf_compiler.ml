@@ -58,9 +58,9 @@ let compile (tree : ast list) compile_instr header_fmt bol_fmt eol_fmt footer_fm
     )
     | AST_loop (ast) :: q -> (
       Printf.printf "l_%d:\n" lbl_id;
-      Printf.printf bol_fmt lbl_id;
+      print (bol_fmt lbl_id);
       let n_lbl_id = aux ast (lbl_id+1) in
-      Printf.printf eol_fmt lbl_id;
+      print (eol_fmt lbl_id);
       Printf.printf "l_%d_n:\n" lbl_id;
       aux q n_lbl_id
     )
@@ -94,8 +94,18 @@ let z80_compile _ input =
   compile
     input z80_compile_instr
     "ld hl, buffer\nld b, 0"
-    "ld a, (hl)\nand a\njp  z, l_%d_n\n"
-    "ld a, (hl)\nand a\njp nz, l_%d\n"
+    (fun i ->
+      let i = string_of_int i in
+      "ld a, (hl)\n" ^
+      "and a\n" ^
+      "jp  z, l_" ^ i ^ "_n\n"
+    )
+    (fun i ->
+      let i = string_of_int i in
+      "ld a, (hl)\n" ^
+      "and a\n" ^
+      "jp nz, l_" ^ i ^ "\n"
+    )
     ""
 
 let x86_compile_instr tok =
@@ -112,8 +122,18 @@ let x86_compile buf_size input =
   compile
     input x86_compile_instr
     "movl buffer, %eax"
-    "cmpb (%%eax), %%bl\nand %%bl, %%bl\njz l_%d_n\n"
-    "movb (%%eax), %%bl\nand %%bl, %%bl\njnz l_%d\n"
+    (fun i ->
+      let i = string_of_int i in
+      "cmpb (%%eax), %%bl\n" ^
+      "and %%bl, %%bl\n" ^
+      "jz l_" ^ i ^ "_n\n"
+    )
+    (fun i ->
+      let i = string_of_int i in
+      "movb (%%eax), %%bl\n" ^
+      "and %%bl, %%bl\n" ^
+      "jnz l_" ^ i ^ "\n"
+    )
     (
       ".data\n" ^
       "buffer:\n" ^
@@ -135,12 +155,12 @@ let mips_compile_instr tok =
   | Tok_incr_ptr -> print "addi $a1, $a1, 4"
   | Tok_decr_ptr -> print "addi $a1, $a1, -4"
   | Tok_put_char -> print (
-      "ori $a0, $a0, 11\n" ^
+      "ori $v0, $zero, 11\n" ^
       "lw $a0, 0($a1)\n" ^
       "syscall"
     )
   | Tok_get_char -> print (
-      "ori $a0, $a0, 12\n" ^
+      "ori $v0, $zero, 12\n" ^
       "syscall\n" ^
       "sw $v0, 0($a1)"
     )
@@ -149,11 +169,23 @@ let mips_compile_instr tok =
 let mips_compile buf_size input =
   compile
     input mips_compile_instr
-    ".text\nla $a1, buffer"
-    "lw $a0, 0($a1)\nbneq $a0, $zero, 1\nj l_%d_n\n"
-    "lw $a0, 0($a1)\nbeq  $a0, $zero, 1\nj l_%d_n\n"
+    ".text\nmain:\nla $a1, buffer"
+    (fun i ->
+      let i = string_of_int i in
+      "lw $a0, 0($a1)\n" ^
+      "bne $a0, $zero, skip_" ^ i ^ "_n\n" ^
+      "j l_" ^ i ^ "_n\n" ^
+      "skip_" ^ i ^ "_n:"
+    )
+    (fun i ->
+      let i = string_of_int i in
+      "lw $a0, 0($a1)\n" ^
+      "beq $a0, $zero, skip_" ^ i ^ "\n" ^
+      "j l_" ^ i ^ "\n" ^
+      "skip_" ^ i ^ ":"
+    )
     (
-      "ori $v0, $v0, 10\n" ^
+      "ori $v0, $zero, 10\n" ^
       "syscall\n" ^
       ".data\n" ^
       "buffer:\n" ^
@@ -183,14 +215,9 @@ let () =
   then print "bf_compiler [architecture] [buffer size]"
   else
     let buf_size = int_of_string (Sys.argv.(2)) in
+    let input = List.fold_left (^) "" (read_lines Stdlib.stdin) in
     match String.lowercase_ascii (Sys.argv.(1)) with
-    | "z80" -> List.iter
-      (fun s -> z80_compile buf_size (parse_with_exception s))
-      (read_lines Stdlib.stdin)
-    | "x86" -> List.iter
-      (fun s -> x86_compile buf_size (parse_with_exception s))
-      (read_lines Stdlib.stdin)
-    | "mips" -> List.iter
-      (fun s -> mips_compile buf_size (parse_with_exception s))
-      (read_lines Stdlib.stdin)
+    | "z80" -> z80_compile buf_size (parse_with_exception input)
+    | "x86" -> x86_compile buf_size (parse_with_exception input)
+    | "mips" -> mips_compile buf_size (parse_with_exception input)
     | _ -> failwith "Architecture invalide"
