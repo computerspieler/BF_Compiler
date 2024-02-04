@@ -43,7 +43,12 @@ let rec parse (toks : token list) =
     let l, q = parse q in
     (AST_instr(t) :: l, q)
 
-let compile (tree : ast list) compile_instr header_fmt bol_fmt eol_fmt =
+(*
+ * bol_fmt: Text for the beginning of loops
+ * eol_fmt: Text for the end of loops
+ * header_fmt: The first instructions to be loaded
+ *)
+let compile (tree : ast list) compile_instr header_fmt bol_fmt eol_fmt footer_fmt =
   let rec aux tree lbl_id =
     match tree with
     | [] -> lbl_id
@@ -61,7 +66,8 @@ let compile (tree : ast list) compile_instr header_fmt bol_fmt eol_fmt =
     )
     in
   print header_fmt;
-  ignore (aux tree 0)
+  ignore (aux tree 0);
+  print footer_fmt
 
 exception ParsingException
 
@@ -90,7 +96,7 @@ let z80_compile input =
     "ld hl, buffer\nld b, 0"
     "ld a, (hl)\nand a\njp  z, l_%d_n\n"
     "ld a, (hl)\nand a\njp nz, l_%d\n"
-
+    ""
 
 let x86_compile_instr tok =
   match tok with
@@ -108,6 +114,42 @@ let x86_compile input =
     "movl buffer, %eax"
     "cmpb (%%eax), %%bl\nand %%bl, %%bl\njz l_%d_n\n"
     "movb (%%eax), %%bl\nand %%bl, %%bl\njnz l_%d\n"
+    ""
+
+let mips_compile_instr tok =
+  match tok with
+  | Tok_incr_case -> print (
+      "lw $a0, 0($a1)\n" ^
+      "addi $a0, $a0, 1\n" ^
+      "sw $a0, 0($a1)"
+    )
+  | Tok_decr_case -> print (
+      "lw $a0, 0($a1)\n" ^
+      "addi $a0, $a0, -1\n" ^
+      "sw $a0, 0($a1)"
+    )
+  | Tok_incr_ptr -> print "addi $a1, $a1, 1"
+  | Tok_decr_ptr -> print "addi $a1, $a1, -1"
+  | Tok_put_char -> print (
+      "ori $a0, $a0, 11\n" ^
+      "lw $a0, 0($a1)\n" ^
+      "syscall"
+    )
+  | Tok_get_char -> print (
+      "ori $a0, $a0, 12\n" ^
+      "syscall\n" ^
+      "sw $v0, 0($a1)"
+    )
+  | _ -> failwith "Impossible"
+      
+let mips_compile input =
+  compile
+    input mips_compile_instr
+    "la $a1, buffer"
+    "lw $a0, 0($a1)\nbneq $a0, $zero, 1\nj l_%d_n\n"
+    "lw $a0, 0($a1)\nbeq  $a0, $zero, 1\nj l_%d_n\n"
+    "ori $v0, $v0, 10\nsyscall"
+    
 
 let read_lines chan =
   let lines = ref [] in
@@ -130,11 +172,14 @@ let () =
   if Array.length Sys.argv = 1
   then print "bf_compiler [architecture]"
   else
-    match Sys.argv.(1) with
+    match String.lowercase_ascii (Sys.argv.(1)) with
     | "z80" -> List.iter
       (fun s -> z80_compile (parse_with_exception s))
       (read_lines Stdlib.stdin)
     | "x86" -> List.iter
       (fun s -> x86_compile (parse_with_exception s))
+      (read_lines Stdlib.stdin)
+    | "mips" -> List.iter
+      (fun s -> mips_compile (parse_with_exception s))
       (read_lines Stdlib.stdin)
     | _ -> failwith "Architecture invalide"
