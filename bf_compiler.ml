@@ -90,7 +90,7 @@ let z80_compile_instr tok =
   | Tok_get_char -> print "get_char"
   | _ -> failwith "Impossible"
 
-let z80_compile input =
+let z80_compile _ input =
   compile
     input z80_compile_instr
     "ld hl, buffer\nld b, 0"
@@ -108,13 +108,17 @@ let x86_compile_instr tok =
   | Tok_get_char -> print "get_char"
   | _ -> failwith "Impossible"
       
-let x86_compile input =
+let x86_compile buf_size input =
   compile
     input x86_compile_instr
     "movl buffer, %eax"
     "cmpb (%%eax), %%bl\nand %%bl, %%bl\njz l_%d_n\n"
     "movb (%%eax), %%bl\nand %%bl, %%bl\njnz l_%d\n"
-    ""
+    (
+      ".data\n" ^
+      "buffer:\n" ^
+      "times " ^ (string_of_int buf_size) ^ " db 0\n"
+    )
 
 let mips_compile_instr tok =
   match tok with
@@ -128,8 +132,8 @@ let mips_compile_instr tok =
       "addi $a0, $a0, -1\n" ^
       "sw $a0, 0($a1)"
     )
-  | Tok_incr_ptr -> print "addi $a1, $a1, 1"
-  | Tok_decr_ptr -> print "addi $a1, $a1, -1"
+  | Tok_incr_ptr -> print "addi $a1, $a1, 4"
+  | Tok_decr_ptr -> print "addi $a1, $a1, -4"
   | Tok_put_char -> print (
       "ori $a0, $a0, 11\n" ^
       "lw $a0, 0($a1)\n" ^
@@ -142,13 +146,19 @@ let mips_compile_instr tok =
     )
   | _ -> failwith "Impossible"
       
-let mips_compile input =
+let mips_compile buf_size input =
   compile
     input mips_compile_instr
-    "la $a1, buffer"
+    ".text\nla $a1, buffer"
     "lw $a0, 0($a1)\nbneq $a0, $zero, 1\nj l_%d_n\n"
     "lw $a0, 0($a1)\nbeq  $a0, $zero, 1\nj l_%d_n\n"
-    "ori $v0, $v0, 10\nsyscall"
+    (
+      "ori $v0, $v0, 10\n" ^
+      "syscall\n" ^
+      ".data\n" ^
+      "buffer:\n" ^
+      ".space " ^ (string_of_int (4*buf_size)) ^ "\n"
+    )
     
 
 let read_lines chan =
@@ -162,24 +172,25 @@ let read_lines chan =
   List.rev !lines
 
 let () =
-  assert (Array.length Sys.argv <= 2);
+  assert (Array.length Sys.argv <= 3);
   let parse_with_exception input = 
     let tree, remaining = parse (lex input) in
     if remaining <> []
     then (raise ParsingException)
     else tree
   in
-  if Array.length Sys.argv = 1
-  then print "bf_compiler [architecture]"
+  if Array.length Sys.argv < 3
+  then print "bf_compiler [architecture] [buffer size]"
   else
+    let buf_size = int_of_string (Sys.argv.(2)) in
     match String.lowercase_ascii (Sys.argv.(1)) with
     | "z80" -> List.iter
-      (fun s -> z80_compile (parse_with_exception s))
+      (fun s -> z80_compile buf_size (parse_with_exception s))
       (read_lines Stdlib.stdin)
     | "x86" -> List.iter
-      (fun s -> x86_compile (parse_with_exception s))
+      (fun s -> x86_compile buf_size (parse_with_exception s))
       (read_lines Stdlib.stdin)
     | "mips" -> List.iter
-      (fun s -> mips_compile (parse_with_exception s))
+      (fun s -> mips_compile buf_size (parse_with_exception s))
       (read_lines Stdlib.stdin)
     | _ -> failwith "Architecture invalide"
